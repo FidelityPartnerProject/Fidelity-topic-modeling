@@ -27,29 +27,38 @@ First, import data and break down into words. Tokenizing at word level. We’re 
 ```{r}
 
 imdb <- read.csv("IMDB Dataset.csv", stringsAsFactors = FALSE)
-imdb<- imdb %>% mutate(review_id = row_number())
+imdb<- imdb %>% mutate(review_id = row_number()) %>% select(-sentiment)
+
+# try sampling: 1000 reviews
+# set.seed(456)
+# imdb <- imdb %>% slice_sample(n = 1000, replace = FALSE)
+
+
 # clean data 
 clean<- function (x , pattern){gsub(pattern, " ", x)}
 
 imdb$review <- clean(imdb$review, "<br />")
 
 # unnest into words, keep the CAPS for sentiment analysis 
-tidy_imdb_words <- imdb %>% unnest_tokens(word, review, to_lower = FALSE) %>% anti_join(stop_words)
+# tidy_imdb_words <- imdb %>% unnest_tokens(word, review, to_lower = FALSE) %>% anti_join(stop_words)
 
-#most common words
-tidy_imdb_words %>% 
-count(word, sort = TRUE)
-
-#plot frequencies
-tidy_imdb_words %>%
-  count(word, sort = TRUE) %>%
-  filter(n > 9000) %>%
-  mutate(word = reorder(word, n)) %>%
-  ggplot(aes(n, word)) +
-  geom_col() +
-  labs(y = NULL)
+# #most common words
+# tidy_imdb_words %>% 
+# count(word, sort = TRUE)
+# 
+# #plot frequencies
+# tidy_imdb_words %>%
+#   count(word, sort = TRUE) %>%
+#   # filter n = 9000 for the whole dataset
+#   filter(n > 9000) %>%
+#   mutate(word = reorder(word, n)) %>%
+#   ggplot(aes(n, word)) +
+#   geom_col() +
+#   labs(y = NULL)
 ```
 If we keep CAPS we can see the most common words include some words that is not very meaningful, so we continue with converting to lower cases.
+
+
 
 ```{r}
 tidy_imdb_words<- imdb %>% unnest_tokens(word, review) %>% anti_join(stop_words)
@@ -57,7 +66,9 @@ tidy_imdb_words<- imdb %>% unnest_tokens(word, review) %>% anti_join(stop_words)
 # # customize stop words -  Manually
 # stop_words <- bind_rows(tibble(word = c("br", "film", "movie", "films", "movies", "characters", "character", "story", "time","people", "watching", "scene", "scenes", "plot","watch", "real", "cast", "director", "lot", "pretty", "10", "actors", "1", "oz", "makes", "2"), lexicon = c("custom")), stop_words)
 
-tidy_imdb_words%>% count(word, sort = TRUE) %>% filter(n > 9000) %>%
+tidy_imdb_words%>% count(word, sort = TRUE) %>% 
+   # filter n = 9000 for the whole dataset
+  filter(n > 9000) %>%
   mutate(word = reorder(word, n)) %>%
   ggplot(aes(n, word)) +
   geom_col() +
@@ -69,24 +80,36 @@ tidy_imdb_words%>% count(word, sort = TRUE) %>% filter(n > 9000) %>%
 ```{r}
 library(textstem)
 lemmatization <- tidy_imdb_words %>% mutate(lemma = word%>% lemmatize_words())
+library(SnowballC)
 stemming <- tidy_imdb_words %>% mutate(stem = word%>% wordStem())
 ```
 
 # Tf-idf
 ```{r}
-review_words<- lemmatization %>% count(review_id, lemma, sort = TRUE) 
+lemma_review_words <- lemmatization %>% count(review_id, lemma, sort = TRUE) 
 
+stem_review_words <- stemming %>% count(review_id, stem, sort = TRUE) 
+
+# calculate the tf separately
 # `total` column means total counts of most common words in each document   
-total_words <- lemmatization %>% count(review_id, lemma, sort = TRUE) %>% 
-  group_by(review_id) %>% summarize(total = sum(n))
+# total_words <- lemmatization %>% count(review_id, lemma, sort = TRUE) %>% 
+#   group_by(review_id) %>% summarize(total = sum(n))
+# 
+# review_words <- left_join(review_words,total_words)
+# review_words
 
-review_words <- left_join(review_words,total_words)
-review_words
-
-imdb_tf_idf <- review_words %>% 
+# lemma tf-idf
+lemma_tf_idf <- lemma_review_words %>% 
   bind_tf_idf(lemma, review_id, n) %>% 
   arrange(tf_idf)
-imdb_tf_idf  
+lemma_tf_idf  
+
+# stem tf-idf
+stem_tf_idf <- stem_review_words %>% 
+  bind_tf_idf(stem, review_id, n) %>% 
+  arrange(tf_idf)
+stem_tf_idf  
+
 # next step: try use percentage as a threshold to automate the identification of stop-words
 
 ```
@@ -97,39 +120,61 @@ imdb_tf_idf
 
 ## Rule 1. Based on tf-idf
 ```{r}
-# run the td-idf after lemmatization
-
+# use the td-idf table after lemmatization
 #  rank the tf-idf and remove common words with very low tf-idf score 
-min_score <- imdb_tf_idf %>% group_by(review_id) %>% mutate(rank = min_rank(tf_idf)) %>% filter(rank < 1 | rank == 1)
+min_score <- lemma_tf_idf %>% group_by(review_id) %>% mutate(rank = min_rank(tf_idf)) %>% filter(rank < 1 | rank == 1)
 my_stopwords1 <- min_score %>% ungroup %>% distinct(lemma)
 
 # check generated stop-words list
 my_stopwords1 
 
-# 108 stop-words when rank = 1
-```
+# 33 stop-words for 1000 reviews when rank = 1
+# 108 stop-words for 50k reviews 
 
+
+# use the td-idf table after stemming
+# same approach:
+
+stem_min_score <- stem_tf_idf %>% group_by(review_id) %>% mutate(rank = min_rank(tf_idf)) %>% filter(rank < 1 | rank == 1)
+stem_my_stopwords1 <- stem_min_score %>% ungroup %>% distinct(stem)
+
+stem_my_stopwords1 
+# check generated stop-words list
+stem_my_stopwords1 
+#104 stop-words for 50k reviews
+```
 
 ## Rule 2. Based on idf
 ```{r}
-min_score <- imdb_tf_idf %>% group_by(review_id) %>% mutate(rank = min_rank(idf)) %>% filter(rank < 1 | rank == 1)
+# use lemma_tf_idf table
+min_score <- lemma_tf_idf %>% group_by(review_id) %>% mutate(rank = min_rank(idf)) %>% filter(rank < 1 | rank == 1)
 my_stopwords2 <- min_score %>% ungroup %>% distinct(lemma)
 
 # check generated stop-words list
 my_stopwords2 
 
-# 92 stop-words when rank = 1
+# 92 stop-words for 1000 reviews when rank = 1
+# 26 stop-words for 50k reviews
 
 
+# use stem_tf_idf table
+
+stem_min_score <- stem_tf_idf %>% group_by(review_id) %>% mutate(rank = min_rank(idf)) %>% filter(rank < 1 | rank == 1)
+stem_my_stopwords1 <- stem_min_score %>% ungroup %>% distinct(stem)
+
+# check generated stop-words list
+stem_my_stopwords1 
+# 91 stop-words for 50k reviews
 
 ```
 
 
-Now write a function for faster execution using tf-idf rule
+Now write a function for faster execution using tf-idf rule:
+1. first try lemma_tf_idf table
 ```{r}
 # create a general function for automation of stop-words
-get_stopwords <- function(tf_idf_table, x){ 
-  # tf_idf_table is the tf-idf table has column names in the order of "id", "lemma","n","total", "tf", "idf" and "tf_idf" 
+find_stopwords <- function(tf_idf_table, x){ 
+  # tf_idf_table is the tf-idf table has column names in the order of "id", "lemma","n", "tf", "idf" and "tf_idf" 
   # id is the first column name of the tf-idf table, it refers to the column that lists the unique id of each document
   # x is the ranking of elements order by tf-idf in an ascending order.
   # So x = 1 would draw out elements with the lowest tf-idf score; x = 2 would get elements with the second lowest tf-idf score.
@@ -142,15 +187,103 @@ return(my_stopwords)
 }
 
 
-# check auto-generated stop-words list
-# when x (rank) = 1, return 108 stop-words
-get_stopwords(imdb_tf_idf, 1)
+# for 50k reviews, 108 stop-words when x (rank) = 1
+find_stopwords(lemma_tf_idf, 1)
+# for 1000 reviews, 33 stop-words when x = 1
 
-# when x (rank) = 2, return 218 stop-words
-get_stopwords(imdb_tf_idf, 2)
+
+
+# for 50k reviews, 218 stop-words when x =2
+find_stopwords(lemma_tf_idf, 2)
+
+# for 1000 reviews, 60 stop-words when x = 2
+
+```
+2. then try stem_tf_idf table
+```{r}
+find_stopwords <- function(tf_idf_table, x){ 
+  # tf_idf_table is the tf-idf table has column names in the order of "id", "stem","n", "tf", "idf" and "tf_idf" 
+  # id is the first column name of the tf-idf table, it refers to the column that lists the unique id of each document
+  # x is the ranking of elements order by tf-idf in an ascending order.
+  # So x = 1 would draw out elements with the lowest tf-idf score; x = 2 would get elements with the second lowest tf-idf score.
+  # min_score is a data frame that contains the elements met the ranking demand  
+id = colnames(tf_idf_table)[1] 
+id <- enquo(id)
+min_score <- tf_idf_table %>% group_by_at(vars(!!id)) %>% mutate(rank = min_rank(tf_idf)) %>% filter(rank < as.numeric(x) | rank == as.numeric(x))
+my_stopwords <- min_score %>% ungroup %>% distinct(stem)
+return(my_stopwords) 
+}
+
+# for 50k reviews, 104 stop-words when x (rank) = 1
+find_stopwords(stem_tf_idf, 1)
+
+
+# for 50k reviews, 217 stop-words when x =2
+find_stopwords(stem_tf_idf, 2)
+
 
 ```
 
+
+Now write a function for faster execution using idf rule
+1. first try use lemma_tf_idf table:
+```{r}
+# create a general function for automation of stop-words
+idf_get_stopwords <- function(tf_idf_table, x){ 
+  # tf_idf_table is the tf-idf table has column names in the order of "id", "lemma","n","total", "tf", "idf" and "tf_idf" 
+  # id is the first column name of the tf-idf table, it refers to the column that lists the unique id of each document
+  # x is the ranking of elements order by tf-idf in an ascending order.
+  # So x = 1 would draw out elements with the lowest tf-idf score; x = 2 would get elements with the second lowest tf-idf score.
+  # min_score is a data frame that contains the elements met the ranking demand  
+id = colnames(tf_idf_table)[1] 
+id <- enquo(id)
+min_score <- tf_idf_table %>% group_by_at(vars(!!id)) %>% mutate(rank = min_rank(idf)) %>% filter(rank < as.numeric(x) | rank == as.numeric(x))
+my_stopwords <- min_score %>% ungroup %>% distinct(lemma)
+return(my_stopwords) 
+}
+
+
+# check auto-generated stop-words list
+# for 50k reviews, return 92 stop-words when x (rank) = 1
+idf_get_stopwords(lemma_tf_idf, 1) 
+
+
+# for 50k reviews, return 197 stop-words, when x (rank) = 2
+idf_get_stopwords(lemma_tf_idf, 2)
+
+
+
+```
+2. then use stem_tf_idf table:
+```{r}
+# create a general function for automation of stop-words
+idf_get_stopwords <- function(tf_idf_table, x){ 
+  # tf_idf_table is the tf-idf table has column names in the order of "id", "lemma","n","total", "tf", "idf" and "tf_idf" 
+  # id is the first column name of the tf-idf table, it refers to the column that lists the unique id of each document
+  # x is the ranking of elements order by tf-idf in an ascending order.
+  # So x = 1 would draw out elements with the lowest tf-idf score; x = 2 would get elements with the second lowest tf-idf score.
+  # min_score is a data frame that contains the elements met the ranking demand  
+id = colnames(tf_idf_table)[1] 
+id <- enquo(id)
+min_score <- tf_idf_table %>% group_by_at(vars(!!id)) %>% mutate(rank = min_rank(idf)) %>% filter(rank < as.numeric(x) | rank == as.numeric(x))
+my_stopwords <- min_score %>% ungroup %>% distinct(stem)
+return(my_stopwords) 
+}
+
+
+# check auto-generated stop-words list
+# for 50k reviews, return 91 stop-words when x (rank) = 1
+idf_get_stopwords(stem_tf_idf, 1) 
+
+
+# for 50k reviews, return 191 stop-words, when x (rank) = 2
+idf_get_stopwords(stem_tf_idf, 2)
+
+
+```
+
+
+### Other methods
 Method 2
 ```{r}
 ## huifei's method - percentage as a threshold
@@ -173,37 +306,53 @@ get_percent_stopwords <- function(my_table,x){
   return(mylist)
 }
 
+lemma_get_percent_stopwords<- function(my_table,x){
+  # mytable is the tf-idf summary table includes columns "word", "tf", "idf" and "tf_idf"
+  # x is the digit and x% of the total word list with least tf-idf score would be listed as stop words
+  limit <- ceiling(0.01*as.numeric(x)*nrow(my_table))
+  mylist <- unique(my_table[1:limit,]$lemma)
+  return(mylist)
+}
 
 # apply function to tf-idf table
+# get tf-idf first
 review_tf_idf <- tidy_imdb_words %>% 
   count(review_id, word, sort = TRUE) %>%  
   bind_tf_idf(word,review_id,n) %>% 
   arrange(tf_idf)
 
 # 3523 stop-words
-length(get_percent_stopwords(review_tf_idf,3))
+get_percent_stopwords(review_tf_idf,3)
+# length(get_percent_stopwords(review_tf_idf,3))
+# for 1000 reviews, 588 stop-words 
+
 
 # 5060 stop-words
 length(get_percent_stopwords(review_tf_idf,5))
+# for 1000 reviews, 1012 stop-words 
 
 # 9647 stop-words
 length(get_percent_stopwords(review_tf_idf,10))
+# for 1000 reviews, 2190 stop-words
 
 
-# ap-ply function to tf-idf table after lemmtization
+# apply function to tf-idf table after lemmtization
 # 2395 stop-words
-length(get_percent_stopwords(imdb_tf_idf,3))
-# length(get_percent_stopwords(fund_tf_idf,3))
+lemma_get_percent_stopwords(imdb_tf_idf,3)
+# length(lemma_get_percent_stopwords(imdb_tf_idf,3))
+# for 1000 reviews, 440 stop-words 
+
 
 # 33 stop-words
-get_percent_stopwords(fund_tf_idf,5)
-# length(get_percent_stopwords(fund_tf_idf,5))
+lemma_get_percent_stopwords(imdb_tf_idf,5)
+# length(lemma_get_percent_stopwords(imdb_tf_idf,5))
+# for 1000 reviews, 751 stop-words
 
 
 # 228 stop-words
-get_percent_stopwords(fund_tf_idf,10)
-# length(get_percent_stopwords(fund_tf_idf,10))
-
+lemma_get_percent_stopwords(imdb_tf_idf,10)
+# length(lemma_get_percent_stopwords(imdb_tf_idf,10))
+# for 1000 reviews, 1598 stop-words
 
 ```
 
