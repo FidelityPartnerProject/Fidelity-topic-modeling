@@ -1,0 +1,81 @@
+```{r message=F,warning=F,fig.width=10}
+library(tidytext)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+options(width=90)
+
+info<-read_csv('imdb_top_1000.csv',show_col_types = FALSE) %>%
+      mutate(doc=paste(Series_Title,Released_Year,sep="_")) %>%
+	  select(doc,Overview)
+	  
+	  
+dat<-info %>%
+     unnest_tokens(word,Overview) %>%
+	 count(doc,word)
+	 
+docnwords<-dat %>% group_by(doc) %>% summarise(nwordsInDoc=n())	
+
+dat<-dat %>% 
+     left_join( docnwords,by='doc')
+	 
+	
+ff<-dat %>%
+    bind_tf_idf(word,doc,n)
+	 
+ff
+
+out<-ff %>% 
+     group_by(doc) %>% 
+     arrange(desc(tf_idf)) %>%
+	 slice_head(n=10)
+	 
+
+ff %>% select(tf,idf,tf_idf) %>% pivot_longer(cols=everything()) %>%
+ggplot(aes(value))+
+   geom_density()+
+   facet_wrap(vars(name),scale='free')+
+   theme_bw()+
+   labs(x='')
+
+
+
+
+filterOut<-function(dfDF,PropInEachDOC=0.4)
+{
+   notkey<-dfDF %>% 
+            group_by(doc) %>% 
+            slice_min(idf,prop=PropInEachDOC)
+   
+   notkeyword<-notkey %>% 
+               group_by(word) %>%
+               summarise(n=n()) %>%
+               arrange(desc(n)) %>%
+   			   slice_max(n,prop=1/4)
+   
+   notkeyword
+}
+
+
+
+filterOut(ff,0.4) %>% as.data.frame()
+
+
+#filterOut(ff,0.3) %>% as.data.frame()
+fil<-filterOut(ff,0.3) %>% select(word)
+
+dat2<- dat %>% anti_join(fil,'word')
+
+docnwords<-dat2 %>% count(doc) %>% rename(nwordsKeepedInDoc=n)
+
+dat2<-dat2 %>% 
+     left_join( docnwords,by='doc')
+	 
+
+dat2
+```
+
+
+
