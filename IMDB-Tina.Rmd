@@ -1,0 +1,157 @@
+---
+title: "IMDB NLP"
+author: "Jiaqi Sun"
+date: "2022-10-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+```
+
+```{r}
+IMDB <- read.csv("IMDB Dataset.csv")
+IMDB_df <- tibble(IMDB)
+glimpse(IMDB_df)
+head(IMDB_df)
+```
+
+```{r}
+library(tidytext)
+
+tidy_IMDB <- IMDB_df %>%
+  unnest_tokens(word, review)
+
+tidy_IMDB
+```
+
+```{r}
+data(stop_words)
+
+tidy_IMDB <- tidy_IMDB %>%
+  anti_join(stop_words)
+
+tidy_IMDB
+```
+```{r}
+tidy_IMDB %>%
+  count(sentiment, word, sort = TRUE) -> IMDB1
+```
+
+```{r}
+#The most common words in IMDB comments
+library(ggplot2)
+
+tidy_IMDB %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 10000) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL)
+```
+
+```{r}
+tidy_IMDB %>% 
+  count(sentiment)
+```
+
+```{r}
+bing_word_counts <- tidy_IMDB %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts
+```
+
+```{r}
+#Words that contribute to positive and negative sentiment in IMDB
+bing_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL)
+```
+
+```{r}
+# The most common words in IMDB
+library(wordcloud)
+
+tidy_IMDB %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+```
+
+```{r}
+# Most common positive and negative words in IMDB
+library(reshape2)
+
+tidy_IMDB %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("gray20", "gray80"),
+                   max.words = 100)
+```
+
+Analyzing word and document frequency: tf-idf
+```{r}
+
+```
+
+LDA:
+```{r}
+library(topicmodels)
+IMDB_dtm <- IMDB1 %>%
+  cast_dtm(sentiment, word, n)
+
+IMDB_dtm
+```
+
+```{r}
+# set a seed so that the output of the model is predictable
+IMDB_lda <- LDA(IMDB_dtm, k = 6, control = list(seed = 1234))
+IMDB_lda
+#> A LDA_VEM topic model with 6 topics.
+```
+
+```{r}
+IMDB_topics <- tidy(IMDB_lda, matrix = "beta")
+IMDB_topics
+```
+
+```{r}
+top_terms <- IMDB_topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 5) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+top_terms
+```
+
+```{r}
+library(ggplot2)
+
+top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+
+```{r}
+IMDB_gamma <- tidy(IMDB_lda, matrix = "gamma")
+IMDB_gamma
+```
+
+```{r}
+
+```
+
