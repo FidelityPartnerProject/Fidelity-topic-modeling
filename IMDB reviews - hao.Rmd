@@ -1,3 +1,5 @@
+
+
 ---
 title: "IMDB EDA"
 author: "Hao He"
@@ -136,7 +138,9 @@ my_stopwords1
 # same approach:
 
 stem_min_score <- stem_tf_idf %>% group_by(review_id) %>% mutate(rank = min_rank(tf_idf)) %>% filter(rank < 1 | rank == 1)
-stem_my_stopwords1 <- stem_min_score %>% ungroup %>% distinct(stem)
+stem_my_stopwords1<- stem_min_score %>% ungroup %>% distinct(stem)
+
+score<- stem_tf_idf %>% group_by(review_id) %>% mutate(rank = min_rank(tf_idf))
 
 stem_my_stopwords1 
 # check generated stop-words list
@@ -178,6 +182,7 @@ find_stopwords <- function(tf_idf_table, x){
   # id is the first column name of the tf-idf table, it refers to the column that lists the unique id of each document
   # x is the ranking of elements order by tf-idf in an ascending order.
   # So x = 1 would draw out elements with the lowest tf-idf score; x = 2 would get elements with the second lowest tf-idf score.
+  # min_rank used to assure that ties are assigned the minimum ranking possible, so the input for the rank is restricted to the smallest possible number.
   # min_score is a data frame that contains the elements met the ranking demand  
 id = colnames(tf_idf_table)[1] 
 id <- enquo(id)

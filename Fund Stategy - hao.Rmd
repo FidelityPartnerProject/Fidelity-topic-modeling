@@ -89,9 +89,9 @@ tidy_strategy_words %>% count(word, sort = TRUE) %>% filter(n > 8000) %>%
 ```{r}
 ## lemmatization and its visualization
 
-lemmatization <- tidy_strategy_words %>% mutate(lemma = word%>% lemmatize_words())
+fund_lemmatization <- tidy_strategy_words %>% mutate(lemma = word%>% lemmatize_words())
 
-lemmatization %>% 
+fund_lemmatization %>% 
 count(lemma, sort = TRUE) %>% filter(n > 8000) %>%
   mutate(lemma = reorder(lemma, n)) %>%
   ggplot(aes(n, lemma, fill = "red")) +
@@ -106,14 +106,14 @@ It can be easily seen that the word frequency of fund increases from approximate
 # Tf-idf
 ```{r ticker tf-idf}
 # tf
-ticker_words<- lemmatization %>% count(fund_id, lemma, sort = TRUE) 
+ticker_words<- fund_lemmatization %>% count(fund_id, lemma, sort = TRUE) 
 
 # `total` column means total counts of most common words in each document   
-total_words <- lemmatization %>% count(fund_id, lemma, sort = TRUE) %>% 
-  group_by(fund_id) %>% summarize(total = sum(n))
-
-ticker_words <- left_join(ticker_words,total_words)
-ticker_words
+# total_words <- lemmatization %>% count(fund_id, lemma, sort = TRUE) %>% 
+#   group_by(fund_id) %>% summarize(total = sum(n))
+# 
+# ticker_words <- left_join(ticker_words,total_words)
+# ticker_words
 
 
 # calculating tf-idf
@@ -191,7 +191,7 @@ return(my_stopwords)
 
 # check auto-generated stop-words list
 # when x (rank) = 1, return 13 stop-words
-get_stopwords(fund_tf_idf, 1)
+fund_stopwords<- get_stopwords(fund_tf_idf, 1)
 
 # when x (rank) = 2, return 27 stop-words
 get_stopwords(fund_tf_idf, 2)
