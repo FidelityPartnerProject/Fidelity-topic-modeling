@@ -20,93 +20,118 @@ library(readr)
 library(textstem)
 ```
 
-Load data and clean
-```{r}
+# Data preprocessing
+First, import data and break down into words. Tokenizing at word level. We’re treating every review as a separate “document”. And then we use lemmatization.
+```{r, warning=FALSE, message=FALSE}
 fund <- readxl::read_xlsx("Fund_Strategy_Data.xlsx")
 
-# colnames(fund)
-
+# clean data 
+clean<- function (x , pattern){gsub(pattern, " ", x)}
 # remove html tags and new lines symbol
-fund$FUND_STRATEGY <- sapply(fund$FUND_STRATEGY, function(x , pattern = "<br>"){gsub(pattern, " ", x)})
-fund$FUND_STRATEGY <- sapply(fund$FUND_STRATEGY, function(x , pattern = "\r\r\n"){gsub(pattern, " ", x)})
+fund$FUND_STRATEGY <- clean(fund$FUND_STRATEGY,"<br>")
+fund$FUND_STRATEGY <- clean(fund$FUND_STRATEGY,"\r\r\n")
 
-# unique rows of `TCKR_C`and `Fund_Strategy` columns
+# # unique rows of `TCKR_C`and `Fund_Strategy` columns
+# 
+# # fund strategy: 6319 rows
+# fund %>% distinct(FUND_STRATEGY)
+# 
+# # ticker : 9513 rows
+# a <- fund%>% distinct(TCKR_C,.keep_all = T)
+# 
+# 
+# # unique values based on ticker and strategy: 12314
+# b <- fund %>% distinct(TCKR_C, FUND_STRATEGY,.keep_all = T)
+# 
+# ## check: which unique fund subset should we use?  
+# 
+# ## funds with no ticker (NA) 
+# dif <- anti_join(b,a)
+# 
+# # funds with no ticker contains different strategies, so keep them, use b as the clean fund dataset after remove duplicated funds 
 
-# fund strategy: 6319 rows
-fund %>% distinct(FUND_STRATEGY)
-
-# ticker : 9513 rows
-a <- fund%>% distinct(TCKR_C,.keep_all = T)
-
-
-# unique values based on ticker and strategy: 12314
-b <- fund %>% distinct(TCKR_C, FUND_STRATEGY,.keep_all = T)
-
-## check: which unique fund subset should we use?  
-
-## funds with no ticker (NA) 
-dif <- anti_join(b,a)
-
-# funds with no ticker contains different strategies, so keep them, use b as the clean fund dataset after remove duplicated funds 
+#rm(c(a,b,dif))
 ```
 
+# tokenization and lemmatization
 
 Use clean data to do toeknization by single word. Unnest word and then calculate the count of word frequency after remove the normal stop-words. Next, use lemmatization to convert a word to its original form.
-```{r}
+```{r, message=FALSE}
 # because there are funds with no ticker, we create a fund id for each fund
-cleanf <- fund %>% mutate(fund_id = row_number()) %>% distinct(TCKR_C, FUND_STRATEGY,.keep_all = T) %>% select(fund_id,everything())
+cleanfund <- fund %>% mutate(id = row_number()) %>% distinct(TCKR_C, FUND_STRATEGY,.keep_all = T) %>% select(id,everything())
+cleanfund <- cleanfund %>% select(id,FUND_STRATEGY)
 
-strategy_words <- cleanf %>% unnest_tokens(word, FUND_STRATEGY) %>% select(fund_id, word)
+# cleandf is a dataframe that contains clean data after data preprocessing
+get_lemma <- function(cleandf){
+  tidy_words <- cleandf %>% unnest_tokens(word, !!sym(colnames(cleandf)[2])) %>% anti_join(stop_words)
+  lemmatization <- tidy_words%>% mutate(lemma = word%>% lemmatize_words())
+  return(lemmatization)
+}
+# get_lemma(cleanfund)
 
-tidy_strategy_words <- strategy_words %>% anti_join(stop_words)
+
+#-------------------------------------------------------------------------------
+# W/O get_lemma function:
+
+# strategy_words <- cleanfund %>% unnest_tokens(word, FUND_STRATEGY) %>% select(id, word)
+# tidy_strategy_words <- strategy_words %>% anti_join(stop_words)
 
 #  word frequency in each document
 ## most common words 
-tidy_strategy_words %>% count(fund_id,word, sort = TRUE) 
+# tidy_strategy_words %>% count(id,word, sort = TRUE) 
+# 
+# 
+# tidy_strategy_words %>% count(id, word, sort = TRUE) %>% filter(n > 15) %>%
+#   mutate(word = reorder(word, n)) %>%
+#   ggplot(aes(n, word)) +
+#   geom_col() +
+#   labs(y = NULL, x = "count of word frequency")
+
+# ## word frequency in the corpus
+# ## most common words 
+# tidy_strategy_words %>% count(word, sort = TRUE) 
+# 
+# 
+# tidy_strategy_words %>% count(word, sort = TRUE) %>% filter(n > 8000) %>%
+#   mutate(word = reorder(word, n)) %>%
+#   ggplot(aes(n, word)) +
+#   geom_col() +
+#   labs(y = NULL, x = "count of word frequency")
 
 
-tidy_strategy_words %>% count(fund_id, word, sort = TRUE) %>% filter(n > 15) %>%
-  mutate(word = reorder(word, n)) %>%
-  ggplot(aes(n, word)) +
-  geom_col() +
-  labs(y = NULL, x = "count of word frequency")
-
-## word frequency in the corpus
-## most common words 
-tidy_strategy_words %>% count(word, sort = TRUE) 
-
-
-tidy_strategy_words %>% count(word, sort = TRUE) %>% filter(n > 8000) %>%
-  mutate(word = reorder(word, n)) %>%
-  ggplot(aes(n, word)) +
-  geom_col() +
-  labs(y = NULL, x = "count of word frequency")
-
-```
-
-
-# lemmatization
-```{r}
 ## lemmatization and its visualization
 
-fund_lemmatization <- tidy_strategy_words %>% mutate(lemma = word%>% lemmatize_words())
+# fund_lemmatization <- tidy_strategy_words %>% mutate(lemma = word%>% lemmatize_words())
+# 
+# fund_lemmatization %>% 
+# count(lemma, sort = TRUE) %>% filter(n > 8000) %>%
+#   mutate(lemma = reorder(lemma, n)) %>%
+#   ggplot(aes(n, lemma, fill = "red")) +
+#   geom_col(show.legend = FALSE) +
+#   labs(y = NULL,x = "count of word frequency after lemmatization" )
 
-fund_lemmatization %>% 
-count(lemma, sort = TRUE) %>% filter(n > 8000) %>%
-  mutate(lemma = reorder(lemma, n)) %>%
-  ggplot(aes(n, lemma, fill = "red")) +
-  geom_col(show.legend = FALSE) +
-  labs(y = NULL,x = "count of word frequency after lemmatization" )
-
-# term frequency of "fund" increases by approximately 1000
+# It can be easily seen that the word frequency of fund increases from approximately 25000 to 35000.
 ```
-It can be easily seen that the word frequency of fund increases from approximately 25000 to 35000.
 
 
 # Tf-idf
 ```{r ticker tf-idf}
-# tf
-ticker_words<- fund_lemmatization %>% count(fund_id, lemma, sort = TRUE) 
+
+
+get_tf_idf <- function(cleandf){
+  tf_idf_table<- cleandf %>% 
+    get_lemma %>% 
+    count(id, lemma, sort = TRUE) %>% 
+    bind_tf_idf(lemma, id, n) %>% arrange(tf_idf)
+  return(tf_idf_table)
+}
+
+get_tf_idf(cleanfund)
+
+# -----------------------------------------------------------------------------
+# W/O get tf-idf function:
+# term frequency
+# ticker_words<- fund_lemmatization %>% count(fund_id, lemma, sort = TRUE) 
 
 # `total` column means total counts of most common words in each document   
 # total_words <- lemmatization %>% count(fund_id, lemma, sort = TRUE) %>% 
@@ -116,30 +141,28 @@ ticker_words<- fund_lemmatization %>% count(fund_id, lemma, sort = TRUE)
 # ticker_words
 
 
-# calculating tf-idf
-fund_tf_idf <- ticker_words %>% bind_tf_idf(lemma, fund_id, n) %>% arrange(tf_idf) 
-
+# # calculating tf-idf
+# fund_tf_idf <- ticker_words %>% bind_tf_idf(lemma, fund_id, n) %>% arrange(tf_idf) 
 
 
 # tf-idf visualization
-library(forcats)
+# library(forcats)
 
-fund_tf_idf %>%
-  group_by(fund_id) %>%
-  slice_max(tf_idf, n = 10) %>%
-  ungroup() %>%
-  ggplot(aes(tf_idf, fct_reorder(lemma, tf_idf), fill = fund_id)) +
-  geom_col(show.legend = FALSE) +
-  facet_wrap(~fund_id, ncol = 4, scales = "free") +
-  labs(x = "tf-idf", y = NULL)
-
+# fund_tf_idf %>%
+#   group_by(id) %>%
+#   slice_max(tf_idf, n = 10) %>%
+#   ungroup() %>%
+#   ggplot(aes(tf_idf, fct_reorder(lemma, tf_idf), fill = id)) +
+#   geom_col(show.legend = FALSE) +
+#   facet_wrap(~fund_id, ncol = 4, scales = "free") +
+#   labs(x = "tf-idf", y = NULL)
 ```
 
 
 
 # automation of stop_words
 for both datasets, without look into the content and the domain specific words
-custom_stop_words: cutoff should be carefully choose, depends on how much data we have
+custom stop words: cutoff should be carefully choose, depends on how much data we have
 
 *Apply different rules to get stop-words list*
 

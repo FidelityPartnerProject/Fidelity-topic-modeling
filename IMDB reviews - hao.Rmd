@@ -29,17 +29,17 @@ First, import data and break down into words. Tokenizing at word level. We’re 
 ```{r}
 
 imdb <- read.csv("IMDB Dataset.csv", stringsAsFactors = FALSE)
-imdb<- imdb %>% mutate(review_id = row_number()) %>% select(-sentiment)
 imdb <- unique(imdb)
 # try sampling: 1000 reviews
 # set.seed(456)
 # imdb <- imdb %>% slice_sample(n = 1000, replace = FALSE)
 
-
 # clean data 
 clean<- function (x , pattern){gsub(pattern, " ", x)}
 
 imdb$review <- clean(imdb$review, "<br />")
+
+cleanimdb<- imdb %>% mutate(review_id = row_number()) %>% select(review_id,review)
 
 # unnest into words, keep the CAPS for sentiment analysis 
 # tidy_imdb_words <- imdb %>% unnest_tokens(word, review, to_lower = FALSE) %>% anti_join(stop_words)
@@ -63,18 +63,26 @@ If we keep CAPS we can see the most common words include some words that is not 
 
 
 ```{r}
-tidy_imdb_words<- imdb %>% unnest_tokens(word, review) %>% anti_join(stop_words)
 
 # # customize stop words -  Manually
 # stop_words <- bind_rows(tibble(word = c("br", "film", "movie", "films", "movies", "characters", "character", "story", "time","people", "watching", "scene", "scenes", "plot","watch", "real", "cast", "director", "lot", "pretty", "10", "actors", "1", "oz", "makes", "2"), lexicon = c("custom")), stop_words)
 
-tidy_imdb_words%>% count(word, sort = TRUE) %>% 
-   # filter n = 9000 for the whole dataset
-  filter(n > 9000) %>%
-  mutate(word = reorder(word, n)) %>%
-  ggplot(aes(n, word)) +
-  geom_col() +
-  labs(y = NULL)
+# # 1. Tokenization
+# tidy_imdb_words<- cleanimdb %>% unnest_tokens(word, review) %>% anti_join(stop_words)
+# 
+# # Plot word frequency after removing built-in stop-words list
+# 
+# # tidy_imdb_words%>% count(word, sort = TRUE) %>% 
+# #    # filter n = 9000 for the whole dataset
+# #   filter(n > 9000) %>%
+# #   mutate(word = reorder(word, n)) %>%
+# #   ggplot(aes(n, word)) +
+# #   geom_col() +
+# #   labs(y = NULL)
+# 
+# # 2. Lemmatization
+# library(textstem)
+# imdb_lemmatization <- tidy_imdb_words %>% mutate(lemma = word%>% lemmatize_words())
 ```
 
 
