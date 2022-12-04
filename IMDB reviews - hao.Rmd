@@ -30,7 +30,7 @@ First, import data and break down into words. Tokenizing at word level. We’re 
 
 imdb <- read.csv("IMDB Dataset.csv", stringsAsFactors = FALSE)
 imdb<- imdb %>% mutate(review_id = row_number()) %>% select(-sentiment)
-
+imdb <- unique(imdb)
 # try sampling: 1000 reviews
 # set.seed(456)
 # imdb <- imdb %>% slice_sample(n = 1000, replace = FALSE)
