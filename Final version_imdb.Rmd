@@ -1,0 +1,107 @@
+---
+title: "Final version - imdb"
+author: "Hao He"
+date: "2022-12-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(stringr)
+library(tidytext)
+library(ggplot2)
+library(topicmodels)
+library(quanteda)
+library(tm)
+library(SnowballC)
+library(RColorBrewer)
+library(readr)
+library(hunspell)
+library(textstem)
+```
+
+# Data preprocessing
+
+First, import data and break down into words. Tokenizing at word level. We're treating every review as a separate "document". And then we use lemmatization.
+
+```{r}
+
+imdb <- read.csv("IMDB Dataset.csv", stringsAsFactors = FALSE)
+imdb <- unique(imdb)
+
+# clean data 
+clean<- function (x , pattern){gsub(pattern, " ", x)}
+
+imdb$review <- clean(imdb$review, "<br />")
+
+cleanimdb<- imdb %>% mutate(id = row_number()) %>% select(id,review)
+```
+
+# Tokenization and lemmatization
+
+Create a function get_lemma to integrate thes process: Use clean data to do toeknization by single word. Unnest word and then calculate the count of word frequency after remove the normal stop-words. Next, use lemmatization to convert a word to its original form.
+
+```{r, message=FALSE}
+
+# write lemmatization function for both data sets
+# cleandf is a dataframe that contains clean data after data preprocessing
+get_lemma <- function(cleandf){
+  tidy_words <- cleandf %>% unnest_tokens(word, !!sym(colnames(cleandf)[2])) %>% anti_join(stop_words)
+  lemmatization <- tidy_words%>% mutate(lemma = word%>% lemmatize_words())
+  return(lemmatization)
+}
+# get_lemma(cleanimdb)
+
+```
+
+# Tf-idf
+
+Create a function get_tf-idf that saves the results of per-word-per-document tf, idf, and tf-idf in a dataframe.
+
+```{r}
+
+get_tf_idf <- function(cleandf){
+  tf_idf_table<- cleandf %>% 
+    get_lemma %>% 
+    count(id, lemma, sort = TRUE) %>% 
+    bind_tf_idf(lemma, id, n) %>% arrange(tf_idf)
+  return(tf_idf_table)
+}
+
+get_tf_idf(cleanfund)
+
+```
+
+# Automation of stop-words
+
+Stop-words generation process:
+
+1.  Create the td-idf table after lemmatization, sort the tf-idf table in an ascending order
+
+2.  Rank the per-word-per document tf-idf using min_rank() function and pull out words with very low tf-idf score:
+
+-   min_rank() is used to assure that ties are assigned the minimum ranking possible, so the input for the rank is restricted to the smallest possible number. This limits the number of words being removed.
+
+3. Get unique values for the extracted words and save the results () in a data frame. 
+
+
+```{r automation of stop words}
+
+find_stopwords <- function(tf_idf_table, x){ 
+  # tf_idf_table is the computed tf-idf table using get_tf-idf function that has column names in the order of "id", "lemma","n", "tf", "idf" and "tf_idf" 
+  # id is the first column name of the tf-idf table, it refers to the column that lists the unique id of each document
+  # x is the ranking of elements order by tf-idf in an ascending order.
+  # So x = 1 would extract 1-word tokens with the lowest tf-idf score; x = 2 would get tokens with the second lowest tf-idf score.
+  # min_rank used to assure that ties are assigned the minimum ranking possible, so the input for the rank is restricted to the smallest possible number.
+  # min_score is a data frame that contains the elements met the ranking demand  
+  
+id = colnames(tf_idf_table)[1] 
+id <- enquo(id)
+min_score <- tf_idf_table %>% group_by_at(vars(!!id)) %>% mutate(rank = min_rank(tf_idf)) %>% filter(rank < as.numeric(x) | rank == as.numeric(x))
+my_stopwords <- min_score %>% ungroup %>% distinct(lemma)
+return(my_stopwords) 
+}
+
+cleanfund %>% get_lemma %>% get_tf_idf() %>% find_stopwords(1) # default rank = 1
+```

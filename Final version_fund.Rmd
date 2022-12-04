@@ -1,0 +1,115 @@
+---
+title: "Final version_fund"
+author: "Hao He"
+date: "2022-12-04"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(stringr)
+library(tidytext)
+library(ggplot2)
+library(topicmodels)
+library(quanteda)
+library(tm)
+library(SnowballC)
+library(RColorBrewer)
+library(readr)
+library(textstem)
+```
+
+# Data preprocessing
+First, import data and break down into words. Tokenizing at word level. We’re treating every review as a separate “document”. And then we use lemmatization.
+
+```{r}
+fund <- readxl::read_xlsx("Fund_Strategy_Data.xlsx")
+
+# clean data 
+clean<- function (x , pattern){gsub(pattern, " ", x)}
+# remove html tags and new lines symbol
+fund$FUND_STRATEGY <- clean(fund$FUND_STRATEGY,"<br>")
+fund$FUND_STRATEGY <- clean(fund$FUND_STRATEGY,"\r\r\n")
+
+# filter unique values based on ticker and strategy: 12314
+# fund %>% distinct(TCKR_C, FUND_STRATEGY,.keep_all = T)
+# this dataframe contains funds with no ticker (NA)
+# funds with no ticker contains different strategies, so keep them, use it as the clean fund dataset after remove duplicated funds 
+
+
+cleanfund <- fund %>% mutate(id = row_number()) %>% distinct(TCKR_C, FUND_STRATEGY,.keep_all = T) %>% select(id,everything())
+cleanfund <- cleanfund %>% select(id,FUND_STRATEGY)
+
+```
+
+# Tokenization and lemmatization
+Create a function get_lemma to integrate these steps:
+Use clean data to do toeknization by single word. Unnest word and then calculate the count of word frequency after remove the normal stop-words. Next, use lemmatization to convert a word to its original form.
+
+```{r}
+# cleandf is a dataframe that contains clean data after data preprocessing
+get_lemma <- function(cleandf){
+  tidy_words <- cleandf %>% unnest_tokens(word, !!sym(colnames(cleandf)[2])) %>% anti_join(stop_words)
+  lemmatization <- tidy_words%>% mutate(lemma = word%>% lemmatize_words())
+  return(lemmatization)
+}
+# get_lemma(cleanfund)
+```
+
+# Tf-idf
+Create a function get_tf-idf that saves the results of per-word-per-document tf, idf, and tf-idf in a dataframe.
+```{r}
+
+get_tf_idf <- function(cleandf){
+  tf_idf_table<- cleandf %>% 
+    get_lemma %>% 
+    count(id, lemma, sort = TRUE) %>% 
+    bind_tf_idf(lemma, id, n) %>% arrange(tf_idf)
+  return(tf_idf_table)
+}
+
+get_tf_idf(cleanfund)
+
+```
+
+# Automation of stop-words
+
+Stop-words generation process:
+
+1.  Create the td-idf table after lemmatization, sort the tf-idf table in an ascending order
+
+2.  Rank the per-word-per document tf-idf using min_rank() function and pull out words with very low tf-idf score:
+
+-   min_rank() is used to assure that ties are assigned the minimum ranking possible, so the input for the rank is restricted to the smallest possible number. This limits the number of words being removed.
+
+3. Get unique values for the extracted words and save them into a dataframe. 
+
+
+```{r, message=FALSE}
+find_stopwords <- function(tf_idf_table, x){ 
+  # tf_idf_table is the tf-idf table has column names in the order of "id", "lemma","n", "tf", "idf" and "tf_idf" 
+  # id is the first column name of the tf-idf table, it refers to the column that lists the unique id of each document
+  # x is the ranking of elements order by tf-idf in an ascending order.
+  # So x = 1 would extract 1-word tokens with the lowest tf-idf score; x = 2 would get tokens with the second lowest tf-idf score.
+  # min_rank used to assure that ties are assigned the minimum ranking possible, so the input for the rank is restricted to the smallest possible number.
+  # min_score is a data frame that contains the elements met the ranking demand  
+  
+id = colnames(tf_idf_table)[1] 
+id <- enquo(id)
+min_score <- tf_idf_table %>% group_by_at(vars(!!id)) %>% mutate(rank = min_rank(tf_idf)) %>% filter(rank < as.numeric(x) | rank == as.numeric(x))
+my_stopwords <- min_score %>% ungroup %>% distinct(lemma)
+return(my_stopwords) 
+}
+
+
+
+# total number of words in the documents: 640095 obs.
+(cleanfund %>% get_lemma %>% dim())[1]
+
+# 80/20 rule
+
+# 50/50 rule
+
+```
+
