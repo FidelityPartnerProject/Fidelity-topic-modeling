@@ -1,6 +1,6 @@
 ---
-title: "Final version_fund"
-author: "Hao He"
+title: "Final version - fund"
+author: "Hao He, Huifei Xu"
 date: "2022-12-04"
 output: html_document
 ---
@@ -38,8 +38,9 @@ fund$FUND_STRATEGY <- clean(fund$FUND_STRATEGY,"\r\r\n")
 # funds with no ticker contains different strategies, so keep them, use it as the clean fund dataset after remove duplicated funds 
 
 
-cleanfund <- fund %>% mutate(id = row_number()) %>% distinct(TCKR_C, FUND_STRATEGY,.keep_all = T) %>% select(id,everything())
-cleanfund <- cleanfund %>% select(id,FUND_STRATEGY)
+cleanfund <- fund %>% mutate(id = row_number()) %>% select(id,FUND_STRATEGY) 
+# %>% distinct(TCKR_C, FUND_STRATEGY,.keep_all = T) %>% select(id,everything())
+# cleanfund <- cleanfund %>% select(id,FUND_STRATEGY)
 
 ```
 
@@ -62,14 +63,14 @@ Create a function get_tf-idf that saves the results of per-word-per-document tf,
 ```{r}
 
 get_tf_idf <- function(cleandf){
-  tf_idf_table<- cleandf %>% 
-    get_lemma %>% 
-    count(id, lemma, sort = TRUE) %>% 
+  tf_idf_table<- cleandf %>%
+    get_lemma %>%
+    count(id, lemma, sort = TRUE) %>%
     bind_tf_idf(lemma, id, n) %>% arrange(tf_idf)
   return(tf_idf_table)
 }
 
-get_tf_idf(cleanfund)
+# get_tf_idf(cleanfund)
 
 ```
 
@@ -87,29 +88,110 @@ Stop-words generation process:
 
 
 ```{r, message=FALSE}
-find_stopwords <- function(tf_idf_table, x){ 
-  # tf_idf_table is the tf-idf table has column names in the order of "id", "lemma","n", "tf", "idf" and "tf_idf" 
+# use rank table as basis for 80/20, 50/50 split
+
+# create a function to get rank table, max of ranks: 193
+# input1: [cleandf] is the data frame contain two main cols "id" and the text content after fundamental text clean
+# output: `n` is the number of words in each rank, `cumsum` show the cumulative number of words for each rank
+
+get_ranktable <- function(cleandf){
+  ranktable <- cleandf %>% get_lemma()%>% get_tf_idf %>% group_by(!!sym(colnames(cleandf)[1])) %>% 
+  mutate(rank = min_rank(tf_idf)) %>% group_by(lemma) %>%
+      arrange(rank) %>%
+    filter(row_number() == 1)%>% select(id,lemma,rank) %>% ungroup %>% count(rank) %>% mutate(total = cumsum(n)) %>% mutate(cum_percent = round(100*cumsum(n)/sum(n),2))
+  return(ranktable)} 
+
+fund_ranktable <- get_ranktable(cleanfund)
+
+# summary(fund_ranktable$rank) 
+# Output Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#   1.0     9.0    18.0    24.3    30.0   193.0 
+
+
+
+# Now use find_stopwords function:
+
+# input1: [cleandf] is the data frame contain two main cols "id" and the text content after fundamental text clean
+# input2: [maxrank] is one integer value. It refers the the maximum rank of tf-idf score for stop words expected to show in output
+# out put: a data frame with two vectors: Vector1 is the stopwords; vector2 is the factors of rank from 1 to the [maxrank]
+find_stopwords <- function(cleandf, maxrank=0, percent=1){ 
+  
+  
+  # tf_idf_table is the computed tf-idf table using get_tf-idf function that has column names in the order of "id", "lemma","n", "tf", "idf" and "tf_idf" 
   # id is the first column name of the tf-idf table, it refers to the column that lists the unique id of each document
   # x is the ranking of elements order by tf-idf in an ascending order.
   # So x = 1 would extract 1-word tokens with the lowest tf-idf score; x = 2 would get tokens with the second lowest tf-idf score.
   # min_rank used to assure that ties are assigned the minimum ranking possible, so the input for the rank is restricted to the smallest possible number.
   # min_score is a data frame that contains the elements met the ranking demand  
   
-id = colnames(tf_idf_table)[1] 
-id <- enquo(id)
-min_score <- tf_idf_table %>% group_by_at(vars(!!id)) %>% mutate(rank = min_rank(tf_idf)) %>% filter(rank < as.numeric(x) | rank == as.numeric(x))
-my_stopwords <- min_score %>% ungroup %>% distinct(lemma)
-return(my_stopwords) 
+  tidy_words <- cleandf %>%
+    unnest_tokens(word, !!sym(colnames(cleandf)[2])) %>%
+    anti_join(stop_words)
+  
+  lemmatization <- tidy_words%>% 
+    mutate(lemma = word %>% 
+             lemmatize_words()
+           )
+  
+  tf_idf_table<- lemmatization %>% 
+    count(id, lemma, sort = TRUE) %>% 
+    bind_tf_idf(lemma, id, n) %>% 
+    arrange(tf_idf)
+  
+  id = colnames(tf_idf_table)[1] 
+  id <- enquo(id)
+  
+  
+  if(maxrank!=0 & percent!=1){
+    stop("Please assign rank or percent not both!")
+  }
+  else if(percent<0 | percent>1){
+    stop("Please choose a fraction between 0 and 1!")
+  } 
+  
+  else{
+    by_rank <-  tf_idf_table %>% 
+      group_by_at(vars(!!id)) %>% 
+      mutate(rank = min_rank(tf_idf)) %>%
+      group_by(lemma) %>%
+      arrange(rank) %>%
+    filter(row_number() == 1)
+
+    if(maxrank==0){
+      maxrank <- max(by_rank$rank)
+    }
+    min_score <- by_rank %>% filter(rank <= as.numeric(maxrank))
+    
+    my_stopwords <- min_score %>% 
+    ungroup %>%
+    select(lemma,rank)
+    
+    dup_logic <- duplicated(my_stopwords$lemma)
+    ans <- my_stopwords[!dup_logic, ]
+  
+    
+    word_count <- dim(ans)[1]
+    target_word_count <- round(percent*word_count)
+    ans <-  ans%>% top_n(-target_word_count)
+
+    ans$rank = factor(ans$rank)
+    
+  }
+  return(ans) 
+
 }
 
-
-
-# total number of words in the documents: 640095 obs.
-(cleanfund %>% get_lemma %>% dim())[1]
+# check fund_ranktable
 
 # 80/20 rule
+find_stopwords(cleanfund,maxrank=49)
+
+
+# 20/80 rule
+find_stopwords(cleanfund,maxrank=15)
 
 # 50/50 rule
-
+find_stopwords(cleanfund,maxrank= 27)
 ```
+
 
